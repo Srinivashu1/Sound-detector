@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Sound dB  Meter</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      background: #f5f5f5;
+      margin: 0;
+      padding: 0;
+    }
+
+    .container {
+      max-width: 500px;
+      margin: auto;
+      padding: 1em;
+      text-align: center;
+    }
+
+    .meter {
+      width: 100%;
+      height: 30px;
+      background: #ddd;
+      margin: 1em 0;
+      border-radius: 5px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .level {
+      height: 100%;
+      width: 0%;
+      background: #4caf50;
+      transition: width 0.1s ease-out;
+    }
+
+    .controls, .target-controls {
+      margin: 1em 0;
+    }
+
+    button {
+      font-size: 1.2em;
+      padding: 0.5em 1em;
+      margin: 0.2em;
+    }
+
+    input[type="number"] {
+      font-size: 1.1em;
+      width: 80px;
+      text-align: center;
+    }
+
+    ul {
+      list-style-type: none;
+      padding: 0;
+    }
+
+    li {
+      margin-bottom: 5px;
+    }
+
+    .popup {
+      display: none;
+      position: fixed;
+      top: 30%;
+      left: 10%;
+      right: 10%;
+      background: white;
+      border: 2px solid red;
+      padding: 1em;
+      font-size: 1.2em;
+      box-shadow: 0 0 10px rgba(0,0,0,0.3);
+      z-index: 9999;
+    }
+
+    .popup button {
+      margin-top: 10px;
+    }
+
+    @media (max-width: 600px) {
+      button, input[type="number"] {
+        font-size: 1em;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Sound dB Meter</h1>
+
+    <div class="meter">
+      <div class="level" id="soundLevel"></div>
+    </div>
+    <p>Current Volume: <span id="volumeValue">0</span> dB</p>
+
+    <div class="controls">
+      <p>Target Volume: <span id="targetValue">35</span> dB</p>
+      <button onclick="adjustTarget(-1)">-</button>
+      <button onclick="adjustTarget(1)">+</button>
+    </div>
+
+    <div class="target-controls">
+      <label>Set Alarm After Reaches: 
+        <input type="number" id="reachGoal" min="1" value="3"> times
+      </label>
+    </div>
+
+    <p>Reached Count: <span id="reachCount">0</span></p>
+    <button onclick="clearHistory()">Clear History</button>
+
+    <h2>Reached History</h2>
+    <ul id="soundHistory"></ul>
+
+    <button onclick="startAudio()">Start Detection</button>
+  </div>
+
+  <!-- Popup -->
+  <div class="popup" id="popup">
+    <p>Alarm: Target reached the set number of times!</p>
+    <button onclick="closePopup()">OK</button>
+  </div>
+
+  <!-- Alarm Sound -->
+  <audio id="alarmSound" src="audio/alarm.wav" preload="auto"></audio>
+
+  <script>
+    let targetDb = 35;
+    let reachCount = 0;
+    const history = [];
+    let popupShown = false;
+    let lastReachedTime = 0;
+
+    function adjustTarget(change) {
+      targetDb = Math.max(1, Math.min(120, targetDb + change));
+      document.getElementById("targetValue").textContent = targetDb;
+    }
+
+    function updateReachCount() {
+      document.getElementById("reachCount").textContent = reachCount;
+    }
+
+    function clearHistory() {
+      history.length = 0;
+      reachCount = 0;
+      updateReachCount();
+      document.getElementById("soundHistory").innerHTML = "";
+      document.getElementById("popup").style.display = "none";
+      popupShown = false;
+      lastReachedTime = 0;
+    }
+
+    function addToHistory(dbLevel) {
+      history.push(dbLevel);
+      const list = document.getElementById("soundHistory");
+      const item = document.createElement("li");
+      item.textContent = `${dbLevel} dB reached`;
+      list.appendChild(item);
+    }
+
+    function checkPopupTrigger() {
+      const goal = parseInt(document.getElementById("reachGoal").value);
+      if (reachCount >= goal && !popupShown) {
+        document.getElementById("popup").style.display = "block";
+        document.getElementById("alarmSound").play();
+        popupShown = true;
+      }
+    }
+
+    function closePopup() {
+      document.getElementById("popup").style.display = "none";
+      popupShown = false;
+    }
+
+    function calculateDb(avg) {
+      return Math.round(10 * Math.log10(avg * avg)) || 0;
+    }
+
+    async function startAudioMeter() {
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mic = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 512;
+      mic.connect(analyser);
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      const levelEl = document.getElementById('soundLevel');
+      const volumeValue = document.getElementById('volumeValue');
+
+      function animate() {
+        analyser.getByteFrequencyData(dataArray);
+        const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+        const dbLevel = calculateDb(avg);
+        const percent = (dbLevel / 120) * 100;
+
+        levelEl.style.width = percent + '%';
+        volumeValue.textContent = dbLevel;
+
+        const now = Date.now();
+        if (dbLevel >= targetDb && now - lastReachedTime > 20000) {
+          reachCount++;
+          updateReachCount();
+          addToHistory(dbLevel);
+          checkPopupTrigger();
+          lastReachedTime = now;
+        }
+
+        requestAnimationFrame(animate);
+      }
+
+      animate();
+    }
+
+    function startAudio() {
+      startAudioMeter().catch(err => {
+        alert("Microphone access is required.");
+        console.error(err);
+      });
+    }
+  </script>
+</body>
+</html>
