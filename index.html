@@ -199,7 +199,7 @@
         volumeValue.textContent = dbLevel;
 
         const now = Date.now();
-        if (dbLevel >= targetDb && now - lastReachedTime > 20000) {
+        if (dbLevel >= targetDb && now - lastReachedTime > 18000) {
           reachCount++;
           updateReachCount();
           addToHistory(dbLevel);
